@@ -23,11 +23,8 @@ The goal of this code is to calculate WW trends.
 
 library(tidyverse)
 library(REDCapR)
-library(lubridate)
-library(sf)
 library(slider)
 library(here)
-library(data.table)
 
 time_start <- now()
 
@@ -38,20 +35,14 @@ time_start <- now()
 
 ```{r load_data}
 
-# file with paths
-source("//dohfltum13.doh.wa.lcl/data/Confidential/DCHS/PHOCIS/Surveillance/COVID-19 Wastewater Surveillance/R Scripts/network_paths.R")
-
-# file with paths
-source(site_fns_path)
-
-# file containing redcap credentials
+# file containing redcap credentials, see credentials_ref.R for the variables needed
 source(here("credentials.R"))
 
-# source calculation functions
-source(trend_fns_path)
+# source calculation functions from nwss
+source(here("wwstrendfunctions.R"))
 
-# read shapefile
-population_sf <- st_read(sf_path) 
+# load the population df for the sewersheds, please contact our team for your file
+load(here("population.RData")) 
 
 ```
 
@@ -61,19 +52,13 @@ Read in redcap data and explore current redcap variables read in to R
 
 ```{r redcap}
 
-# get redcap sites
-redcap_sites <- redcap_read_oneshot(redcap_uri=redcap_url, token=site_token)$data
-
-# new facility crosswalk 
-facility_crosswalk <- get_site_key(redcap_sites) %>% rename(DCIPHER_site_id = site_id)
-
-# retrieve the ww samples redcap data, keep data from samples that have been collected
-# filter to samples with collection dates - sample_ids are created before samples are collected
+# retrieve the ww samples redcap data
 redcap_ww_samples <- redcap_read(redcap_uri=redcap_url, token=ww_samples_token)$data
 
 # ww sample data from non-repeating instruments
 redcap_samples<- redcap_ww_samples %>% 
                       filter(is.na(redcap_repeat_instrument)) %>%
+                      # remove columns
                       select(-c(redcap_repeat_instrument,
                                 test_result_date,
                                 redcap_repeat_instance,
@@ -87,11 +72,13 @@ redcap_samples<- redcap_ww_samples %>%
 # pcr target associated data from c3_pcr_target_report_form
 redcap_targets <- redcap_ww_samples %>% 
                       filter(redcap_repeat_instrument =="c3_pcr_target_report_form") %>%
+                      # keep only desired columns
                       select(sample_id, 
                              test_result_date,
                              starts_with("pcr"),
                              lod_sewage,
                              quality_flag) %>%
+                      # map values
                       mutate(pcr_target = case_match(pcr_target, 
                                                       1 ~	"sars-cov-2",
                                                       2	~ "delta",
@@ -119,41 +106,25 @@ redcap_targets <- redcap_ww_samples %>%
                                                           16 ~ "InfA1 and InfA2 combined",
                                                           17 ~ "RSV-A and RSV-B combined"))
 
-# variant data from sequence_proportions
-redcap_variants <- redcap_ww_samples %>% 
-                      filter(redcap_repeat_instrument =="sequence_proportions") %>%
-                      select(sample_id, 
-                             sample_collect_date,
-                             sample_site_name,
-                             variant_name,
-                             variant_prop) 
-
-# key for the site_id and corresponding population
-# we don't really need to share a sf with LHJs, especially because we drop the geometry
-# it would be more ideal for us to share an R object with each LHJ that has their sites
-site_population_key <- population_sf %>% select(site,site_id,totalpop) %>% 
-                          st_drop_geometry()
 
 # merge the target specific and sample specific variables
 redcap_all_samples <- redcap_targets %>% 
                           merge(redcap_samples, by = "sample_id") %>%
                           mutate(sample_id = as.character(sample_id)) %>%
-                          # the sample site name show up the same as sample site ID, 
-                          # using facility crosswalk to fix this
+                          # rename the sample site name to match naming in the population df
                           rename(site_id = sample_site_name) %>% 
-                          left_join(site_population_key, by = "site_id")  %>% 
+                          # join to add the population data
+                          left_join(population, by = "site_id")  %>% 
                           # format the date
-                          # remove data missing sample_site_ids
                           mutate(sample_collect_date = as.Date(sample_collect_date)) %>% 
+                          # remove data missing sample_site_ids
                           filter(!is.na(site_id)) %>%
+                          # group by site id and gene target
                           group_by(site_id,pcr_gene_target, .drop = F) %>% 
                           # keep only first ww record if there are two for a site on the same day
                           distinct(sample_collect_date, .keep_all = TRUE)
 
-
-
 ```
-
 
 
 ## Calculate wastewater trends
@@ -169,17 +140,17 @@ wwdata_flow_calc <- redcap_all_samples %>%
                           # calculate flow rate in Liters
                           # original flow rate is in Million gallons per day; 
                           # 1 million gallon/day [US] to liters per day = 3785411.8 liters per day updated 2022-09-12
-                          # filter data with normalized conc > 0
-                          # pcr target conc is in terms of cp/L, previously was cp/mL, so covert to ml
                             mutate(flow_rate_l = flow_rate*3785411.8, 
                                    pcr_target_norm_conc = (pcr_target_avg_conc*flow_rate_l)/totalpop, 
                                    pcr_target_log_norm_conc = log(pcr_target_norm_conc)) %>%  
+                            # filter data with normalized conc > 0
                             filter(pcr_target_norm_conc > 0) 
 
 # calculate trends for each sample site id
 # if desired, only calculate trends for a specific gene target
 wwtrends_cat <-  wwdata_flow_calc %>% #filter(pcr_gene_target == "n1") %>% 
                                   group_by(site_id, pcr_gene_target) %>% 
+                                  # calculate trends for each site/gene target combination
                                   group_modify(~ calc_classify_trends(.data = .,
                                        .date = "sample_collect_date",
                                        .trend_var ='pcr_target_log_norm_conc' ,
@@ -235,11 +206,11 @@ core_dataset <-  wwtrends_cat %>% rename(sample_collect_date = date) %>%
 
 ```
 
-## Save r object
+## Save core_dataset
 
 ```{r save}
-
-save(core_dataset, file = core_dataset_path2)
+# The line below saves an R object, alternatively the df could be saved as a csv
+# save(core_dataset, file = core_dataset_path2)
 
 time_end <- now()
 
