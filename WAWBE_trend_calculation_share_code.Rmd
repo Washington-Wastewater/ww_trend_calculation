@@ -143,18 +143,13 @@ wwdata_flow_calc <- redcap_all_samples %>%
                           # calculate flow rate in Liters
                           # original flow rate is in Million gallons per day; 
                           # 1 million gallon/day [US] to liters per day = 3785411.8 liters per day updated 2022-09-12
+                          # If the pcr_target_avg_conc is less than the lod_sewage, 
+                          # then the adjusted concentration value is 1/2 the lod sewage value
+                          # This value change is is alignment with how CDC NWSS handles samples with concentrations below lod
                             mutate(flow_rate_l = flow_rate*3785411.8, 
-                                   pcr_target_norm_conc = (pcr_target_avg_conc*flow_rate_l)/totalpop, 
+                                   pcr_target_avg_conc_adj = if_else(pcr_target_avg_conc < lod_sewage, 0.5 * lod_sewage, pcr_target_avg_conc),
+                                   pcr_target_norm_conc = (pcr_target_avg_conc_adj*flow_rate_l)/totalpop, 
                                    pcr_target_log_norm_conc = log(pcr_target_norm_conc)) %>%  
-                          # If the pcr_target_avg_conc is equal to 0, 
-                          # then a log normalized conc value is either na or 0
-                          # replace the log norm concentration value with 1/2 the lod sewage value
-                          # to indicate that a sample was collected.This step must be done after the norm
-                          # step, to prevent false trends from emerging. This value change is 
-                          # necessary as a clear indication that a sample was collected on that date, otherwise
-                          # the data point will be filtered out and not represented in the trend calculation step. 
-                            mutate(pcr_target_log_norm_conc = if_else(pcr_target_avg_conc == 0, 
-                                                            0.5 * lod_sewage, pcr_target_log_norm_conc)) %>%
                             # filter data with log normalized conc > 0
                             filter(pcr_target_log_norm_conc > 0) 
 
