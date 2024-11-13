@@ -149,13 +149,32 @@ wwdata_flow_calc <- redcap_all_samples %>%
                             mutate(flow_rate_l = flow_rate*3785411.8, 
                                    pcr_target_avg_conc_adj = if_else(pcr_target_avg_conc < lod_sewage, 0.5 * lod_sewage, pcr_target_avg_conc),
                                    pcr_target_norm_conc = (pcr_target_avg_conc_adj*flow_rate_l)/totalpop, 
-                                   pcr_target_log_norm_conc = log(pcr_target_norm_conc)) %>%  
+                                   pcr_target_log_norm_conc = log10(pcr_target_norm_conc)) %>%  
                             # filter data with log normalized conc > 0
                             filter(pcr_target_log_norm_conc > 0) 
 
+# Calculate the adjustment values for special handling of reported 0 concentration
+adjustment_values <- wwdata_flow_calc %>% 
+  filter(pcr_target_avg_conc > 0) %>% 
+  group_by(pcr_gene_target) %>% 
+  summarise(mean= mean(pcr_target_log_norm_conc), 
+            min = min(pcr_target_log_norm_conc), 
+            max = max(pcr_target_log_norm_conc), 
+            adj_log_norm_conc = 0.75 * min(pcr_target_log_norm_conc))   
+
+# Replace pcr_target_log_norm_conc with the calculated adjusted value when the
+# reported concentration is 0
+wwdata_flow_calc_adjusted <- wwdata_flow_calc %>%
+  left_join(adjustment_values, by = "pcr_gene_target") %>%
+  mutate(
+    pcr_target_log_norm_conc = if_else(pcr_target_avg_conc == 0, 
+                                       adj_log_norm_conc, 
+                                       pcr_target_log_norm_conc)) %>%
+  select(-adj_log_norm_conc)
+
 # calculate trends for each sample site id
 # if desired, only calculate trends for a specific gene target
-wwtrends_cat <-  wwdata_flow_calc %>% #filter(pcr_gene_target == "n1") %>% 
+wwtrends_cat <-  wwdata_flow_calc_adjusted %>% #filter(pcr_gene_target == "n1") %>% 
                                   group_by(site_id, pcr_gene_target) %>% 
                                   # calculate trends for each site/gene target combination
                                   group_modify(~ calc_classify_trends(.data = .,
