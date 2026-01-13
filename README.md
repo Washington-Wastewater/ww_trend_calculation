@@ -16,6 +16,10 @@ The purpose of this code is to process wastewater testing results and calculate 
 
 - This file contains trend calculation functions provided by NWSS that are used in WAWBE_trend_calculation_share_code.Rmd
 
+**wval_functions_v2.R**
+
+- This file contains functions to calculate wastewater viral activity level (WVAL) for SARS-CoV-2, Influenza, and RSV with the NEW updated methodology published in August 2025. 
+
 **credentials_ref.R**
 
 - This is a reference file for the credentials.R file that is necessary to run the script. The purpose of this file is to store the REDCap API token (password)

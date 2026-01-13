@@ -37,16 +37,16 @@ time_start <- now()
 ```{r load_data}
 
 # file containing redcap credentials, see credentials_ref.R for the variables needed
-source(here("credentials.R"))
+source(here("R/credentials.R"))
 
 # source calculation functions from nwss
-source(here("wwstrendfunctions.R"))
+source(here("R/wwstrendfunctions.R"))
 
 # load the population df for the sewersheds, please contact our team for your file
-load(here("population.RData")) 
+load(here("population.RData"))
 
 # load wval functions
-source(here("wval_functions_v2.R"))
+source(here("R/wval_functions_v2.R"))
 
 ```
 
