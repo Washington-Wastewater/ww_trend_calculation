@@ -48,6 +48,9 @@ load(here("population.RData"))
 # load wval functions
 source(here("R/wval_functions_v2.R"))
 
+# add county name here 
+county <- "ENTER YOUR COUNTY NAME HERE"
+
 ```
 
 ## Read and merge redacap data
@@ -203,7 +206,7 @@ geo_mean <- function(x){
 ## Step 2e: Create a new adjusted wastewater concentration dataset that:
 # - calculates the 7-day rolling geometric mean of 1/2*LOD adjusted normalized concentrations for each site and gene target
 wwdata_flow_calc_adjusted <- wwdata_flow_calc_adjusted %>%
-  group_by(sample_site_id, pcr_gene_target) %>%
+  group_by(site_id, pcr_gene_target) %>%
   mutate(pcr_target_norm_7day_geomean = slide_dbl(
     .x = pcr_target_norm_conc,
     .f = geo_mean,
@@ -212,6 +215,8 @@ wwdata_flow_calc_adjusted <- wwdata_flow_calc_adjusted %>%
     .complete = FALSE
   )
 ) %>%
+  # add county variable
+  mutate(county_main = county) %>%
   ungroup()
 
 ## Step 2f: Create a 15-day wastewater trends dataset that:
@@ -321,6 +326,8 @@ Influenza A and RSV: New wastewater sampling sites, or sites with a substantial 
 # - adds pcr type variable that designates what type of pcr each instrument is performing
 # - creates a variable that determines what the major lab method is based on the concentration method and the pcr type
 wwdata_flow_calc_doh <- wwdata_flow_calc %>%
+  rename(sample_site_id = site_id,
+         sample_site_name = site) %>%
   # filter to PHL
   filter(micro_lab_name == '001') %>%
   # get pcr type from equipment ID
@@ -341,7 +348,9 @@ wwdata_flow_calc_doh <- wwdata_flow_calc %>%
     concentration_method == 'ceresnano' & pcr_type == 'qiagen dpcr' ~ 8,
     # default value if none match
     TRUE ~ NA_integer_
-  )) 
+  )) %>%
+    # assign county variable
+    mutate(county_main = county)
   
 ## Step 3b: Create new site-week aggregated wastewater viral activity level for sars-cov-2 and flu a
 # - these datasets will be further aggregated into county week level
@@ -376,7 +385,8 @@ wval_county_agg <- wval_site_agg_raw  %>%
 # Step 4: Create final dataset
 
 ## Step 4a: Create clean wastewater sample dataset
-keep_flow_calc <- wwdata_flow_calc %>% select(site_id, 
+keep_flow_calc <- wwdata_flow_calc_adjusted %>% select(sample_id,
+                                                  site_id, 
                                                   sample_collect_date,
                                                   test_result_date,
                                                   import_redcap_date,
@@ -385,11 +395,13 @@ keep_flow_calc <- wwdata_flow_calc %>% select(site_id,
                                                   pcr_gene_target,
                                                   pcr_target_avg_conc,
                                                   pcr_target_norm_conc,
+                                                  pcr_target_norm_7day_geomean,
                                                   pcr_target_below_lod,
                                                   flow_rate_l,
                                                   totalpop,
                                                   viral_data_flag,
-                                                  data_flag_notes) 
+                                                  data_flag_notes,
+                                                  county_main) 
 
 ## Step 4b: Calculate the max sample date that has test results 
 keep_flow_calc$sample_collect_date <- as.Date(keep_flow_calc$sample_collect_date)
@@ -413,7 +425,7 @@ core_dataset <-  wwtrends_cat %>%
   mutate(week_end = sample_collect_date + days(7-wday(sample_collect_date))) %>% 
   left_join(x=.,
             y= keep_flow_calc,
-            by= c("sample_collect_date", "sample_site_id", "pcr_gene_target")) %>%
+            by= c("sample_collect_date", "site_id", "pcr_gene_target")) %>%
   # Adding in the gene target for the sake of merging
  mutate(pcr_target = case_when(
    pcr_gene_target %in% c('n', 'n1', 'n2') ~ "sars-cov-2",
@@ -430,7 +442,7 @@ core_dataset <-  wwtrends_cat %>%
  ) %>%
   left_join(x=.,
             wval_site_agg, 
-            by = c("pcr_target", "week_end", "sample_site_id", "county_main")) %>%
+            by = c("pcr_target", "week_end", "site_id" = "sample_site_id", "county_main")) %>%
   left_join(x=.,
             wval_county_agg, 
             by = c("pcr_target", "week_end", "county_main")) %>%
