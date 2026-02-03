@@ -37,7 +37,7 @@ time_start <- now()
 ```{r load_data}
 
 # file containing redcap credentials, see credentials_ref.R for the variables needed
-source(here("R/credentials.R"))
+source(here("R/credentials_ref.R"))
 
 # source calculation functions from nwss
 source(here("R/wwstrendfunctions.R"))
@@ -137,6 +137,7 @@ redcap_all_samples <- redcap_targets %>%
                           # targets tested, with no positive detection will
                           # have a missing conc value. To show no detection, change NA to 0
                           mutate(pcr_target_avg_conc = if_else(is.na(pcr_target_avg_conc),0, pcr_target_avg_conc))
+
 
 ```
 
@@ -354,7 +355,7 @@ wwdata_flow_calc_doh <- wwdata_flow_calc %>%
   
 ## Step 3b: Create new site-week aggregated wastewater viral activity level for sars-cov-2 and flu a
 # - these datasets will be further aggregated into county week level
-wval_site_agg_raw_sars <-  wval_v2(wwdata_flow_calc_doh, target = 'sars-cov-2')
+wval_site_agg_raw_sars <- wval_v2(wwdata_flow_calc_doh, target = 'sars-cov-2')
 wval_site_agg_raw_flua <- wval_v2(wwdata_flow_calc_doh, target = 'FLUAV')
 
 ## Step 3c: Join both wval datasets together

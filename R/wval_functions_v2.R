@@ -146,7 +146,7 @@ calc_n1n2_avg <- function(data) {
     mutate(pcr_gene_target_agg = pcr_gene_target)
   
   # combine averaged and individual results
-  final_result <- bind_rows(sars_averaged, sars_individual)
+  final_result <- rbind(sars_averaged, sars_individual)
   
   return(final_result)
 }
