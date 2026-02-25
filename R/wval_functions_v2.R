@@ -44,7 +44,7 @@
 
 #Influenza A:
 #Very Low: Up to 2.7
-#Low: Greater than 2.7 and up to 6.5	
+#Low: Greater than 2.7 and up to 6.2	
 #Moderate: Greater than 6.2 and up to 11.2	
 #High: Greater than 11.2 and up to 17.6	
 #Very High: Greater than 17.6
@@ -105,6 +105,11 @@ calc_n1n2_avg <- function(data) {
     filter(n_gene_targets == 2) %>%
     pull(sample_id)
   
+  # if no paired samples, just add the column and return
+  if (length(samples_with_both) == 0) {
+    return(data %>% mutate(pcr_gene_target_agg = as.character(pcr_gene_target)))
+  }
+  
   # process samples with BOTH n1 and n2 and calculate geometric mean of them
   sars_averaged <- data %>%
     # filter to samples with both n1 and n2 with same sample ID 
@@ -146,7 +151,7 @@ calc_n1n2_avg <- function(data) {
     mutate(pcr_gene_target_agg = pcr_gene_target)
   
   # combine averaged and individual results
-  final_result <- rbind(sars_averaged, sars_individual)
+  final_result <- bind_rows(sars_averaged, sars_individual)
   
   return(final_result)
 }
@@ -233,7 +238,7 @@ remove_outliers <- function(data) {
 
 # Influenza A:
 # Very Low: Up to 2.7
-# Low: Greater than 2.7 and up to 6.5	
+# Low: Greater than 2.7 and up to 6.2	
 # Moderate: Greater than 6.2 and up to 11.2	
 # High: Greater than 11.2 and up to 17.6	
 # Very High: Greater than 17.6
@@ -377,6 +382,8 @@ wval_v2 <- function(data, target) {
       site_id_with_pcr_source = paste(site_id, pcr_target, source, sep = "_"),
       # add new column that combines site_id, pcr_target, source, and major lab method
       site_id_with_pcr_source_mlm = paste(site_id_with_pcr, source, major_lab_method, sep = "_")) %>%
+    # group by site, pcr target, and lab method to calculate days since first sample
+    group_by(site_id_with_pcr_source_mlm) %>%
     # calculate days since first sample and first sample collection date
     mutate(
       days_since_first_sample = as.integer(difftime(sample_collect_date, min(sample_collect_date), units = "days")),
@@ -419,12 +426,17 @@ wval_v2 <- function(data, target) {
       complete(sample_collect_date = seq.Date(min(sample_collect_date, na.rm = TRUE),
                                               max(sample_collect_date, na.rm = TRUE),
                                               by = 'day')) %>%
-      mutate(year_val = year(sample_collect_date),
+      # add flu season year: august 1st recalculation
+      mutate(flu_season_year = if_else(month(sample_collect_date) >= 8,
+                                       year(sample_collect_date),
+                                       year(sample_collect_date) - 1L),
              # days to nearest august 1st recalculation target date
              days_to_nearest_target = sapply(sample_collect_date, calc_days_to_target_flu_rsv)) %>%
-      group_by(site_id_with_pcr_source_mlm, year_val) %>%                       
+      group_by(site_id_with_pcr_source_mlm, flu_season_year) %>%                       
       mutate(min_days_to_target = min(days_to_nearest_target, na.rm = TRUE)) %>%
-      ungroup()
+      ungroup() %>%
+      # drop helper variable
+      select(-flu_season_year)
   }
   
   ##################################################
@@ -465,8 +477,7 @@ wval_v2 <- function(data, target) {
   else {
     all_final4 <- all_final3 %>%
       group_by(site_id_with_pcr_source_mlm) %>%
-      mutate(baseline_flag = (days_since_first_sample <= 365) | (days_to_nearest_target == min_days_to_target) &
-               (month(sample_collect_date) %in% 8:12),
+      mutate(baseline_flag = (days_since_first_sample <= 365) | (days_to_nearest_target == min_days_to_target),
              temp_baseline = if_else(
                baseline_flag,
                slide_index_dbl(pcr_target_avg_conc_ln, sample_collect_date,
