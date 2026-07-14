@@ -39,17 +39,20 @@ time_start <- now()
 # file containing redcap credentials, see credentials_ref.R for the variables needed
 source(here("R/credentials_ref.R"))
 
-# source calculation functions from nwss
-source(here("R/wwstrendfunctions.R"))
-
 # load the population df for the sewersheds, please contact our team for your file
 load(here("population.RData"))
 
 # load wval functions
 source(here("R/wval_functions_v2.R"))
 
+# source simple metric calculation functions
+source(here("R/simple_metric_fns.R"))
+
+# source calculation functions from nwss
+source(here("R/redcap_samples_functions.R"))
+
 # add county name here 
-county <- "ENTER YOUR COUNTY NAME HERE"
+COUNTY <- "ENTER YOUR COUNTY NAME HERE"
 
 ```
 
@@ -64,80 +67,91 @@ Read in redcap data and explore current redcap variables read in to R
 # retrieve the ww samples redcap data
 redcap_ww_samples <- redcap_read(redcap_uri=redcap_url, token=ww_samples_token)$data
 
-## Step 1b: Create subset wastewater sample dataset that filters out samples from repeating instruments 
-redcap_samples<- redcap_ww_samples %>% 
-                      filter(is.na(redcap_repeat_instrument)) %>%
-                      # remove columns
-                      select(-c(redcap_repeat_instrument,
-                                test_result_date,
-                                redcap_repeat_instance,
-                                starts_with("pcr"),
-                                lod_sewage,
-                                quality_flag,
-                                contains(c("variant", "complete", "timestamp", 
-                                           "received", "printed",
-                                           "orig")))) 
+# ## Step 1b: Create subset wastewater sample dataset that filters out samples from repeating instruments 
+# redcap_samples<- redcap_ww_samples %>% 
+#                       filter(is.na(redcap_repeat_instrument)) %>%
+#                       # remove columns
+#                       select(-c(redcap_repeat_instrument,
+#                                 test_result_date,
+#                                 redcap_repeat_instance,
+#                                 starts_with("pcr"),
+#                                 lod_sewage,
+#                                 quality_flag,
+#                                 contains(c("variant", "complete", "timestamp", 
+#                                            "received", "printed",
+#                                            "orig")))) 
+# 
+# ## Step 1c. Create a subset of the wastewater samples dataset that coincides with WAWBE pcr targets and gene targets
+# # pcr target associated data from c3_pcr_target_report_form
+# redcap_targets <- redcap_ww_samples %>% 
+#                       filter(redcap_repeat_instrument =="c3_pcr_target_report_form") %>%
+#                       # keep only desired columns
+#                       select(sample_id, 
+#                              test_result_date,
+#                              starts_with("pcr"),
+#                              lod_sewage,
+#                              quality_flag) %>%
+#                       # map values
+#                       mutate(pcr_target = case_match(pcr_target, 
+#                                                       1 ~	"sars-cov-2",
+#                                                       2	~ "delta",
+#                                                       3	~ "omicron",
+#                                                       4	~ "hMPXV",
+#                                                       5	~ "FLUAV",
+#                                                       6	~ "FLUBV",
+#                                                       7 ~ "RSV"),
+#                              pcr_gene_target = case_match(pcr_gene_target,
+#                                                           1	~ "n1",
+#                                                           2	~ "n2",
+#                                                           3	~ "p681r",
+#                                                           4	~ "del156-157",
+#                                                           5	~ "wt214",
+#                                                           6	~ "del69/70",
+#                                                           7	~ "ins214epe",
+#                                                           8	~ "del142-144",
+#                                                           9	~ "wt156-157",
+#                                                           10 ~ "e9l-nvar",
+#                                                           11 ~ "G2R_G",
+#                                                           12 ~ "InfA1",
+#                                                           13 ~ "InfA2",
+#                                                           14 ~ "InfB",
+#                                                           15 ~ "n",
+#                                                           16 ~ "InfA1 and InfA2 combined",
+#                                                           17 ~ "RSV-A and RSV-B combined"))
+# 
+# 
+# ## Step 1d: Create new dataset from merge of wastewater samples dataset and facility/site information dataset
+# # merge the target specific and sample specific variables
+# redcap_all_samples <- redcap_targets %>% 
+#                           merge(redcap_samples, by = "sample_id") %>%
+#                           mutate(sample_id = as.character(sample_id)) %>%
+#                           # rename the sample site name to match naming in the population df
+#                           rename(site_id = sample_site_name) %>% 
+#                           # join to add the population data
+#                           left_join(population, by = "site_id")  %>% 
+#                           # format the date
+#                           mutate(sample_collect_date = as.Date(sample_collect_date)) %>% 
+#                           # remove data missing sample_site_ids
+#                           filter(!is.na(site_id)) %>%
+#                           # group by site id and gene target
+#                           group_by(site_id,pcr_gene_target, .drop = F) %>% 
+#                           # keep only first ww record if there are two for a site on the same day
+#                           distinct(sample_collect_date, .keep_all = TRUE) %>%
+#                           # targets tested, with no positive detection will
+#                           # have a missing conc value. To show no detection, change NA to 0
+#                           mutate(pcr_target_avg_conc = if_else(is.na(pcr_target_avg_conc),0, pcr_target_avg_conc))
 
-## Step 1c. Create a subset of the wastewater samples dataset that coincides with WAWBE pcr targets and gene targets
-# pcr target associated data from c3_pcr_target_report_form
-redcap_targets <- redcap_ww_samples %>% 
-                      filter(redcap_repeat_instrument =="c3_pcr_target_report_form") %>%
-                      # keep only desired columns
-                      select(sample_id, 
-                             test_result_date,
-                             starts_with("pcr"),
-                             lod_sewage,
-                             quality_flag) %>%
-                      # map values
-                      mutate(pcr_target = case_match(pcr_target, 
-                                                      1 ~	"sars-cov-2",
-                                                      2	~ "delta",
-                                                      3	~ "omicron",
-                                                      4	~ "hMPXV",
-                                                      5	~ "FLUAV",
-                                                      6	~ "FLUBV",
-                                                      7 ~ "RSV"),
-                             pcr_gene_target = case_match(pcr_gene_target,
-                                                          1	~ "n1",
-                                                          2	~ "n2",
-                                                          3	~ "p681r",
-                                                          4	~ "del156-157",
-                                                          5	~ "wt214",
-                                                          6	~ "del69/70",
-                                                          7	~ "ins214epe",
-                                                          8	~ "del142-144",
-                                                          9	~ "wt156-157",
-                                                          10 ~ "e9l-nvar",
-                                                          11 ~ "G2R_G",
-                                                          12 ~ "InfA1",
-                                                          13 ~ "InfA2",
-                                                          14 ~ "InfB",
-                                                          15 ~ "n",
-                                                          16 ~ "InfA1 and InfA2 combined",
-                                                          17 ~ "RSV-A and RSV-B combined"))
 
+## Step 1b: Transform redcap instrument data to df format
 
-## Step 1d: Create new dataset from merge of wastewater samples dataset and facility/site information dataset
-# merge the target specific and sample specific variables
-redcap_all_samples <- redcap_targets %>% 
-                          merge(redcap_samples, by = "sample_id") %>%
-                          mutate(sample_id = as.character(sample_id)) %>%
-                          # rename the sample site name to match naming in the population df
-                          rename(site_id = sample_site_name) %>% 
-                          # join to add the population data
-                          left_join(population, by = "site_id")  %>% 
-                          # format the date
-                          mutate(sample_collect_date = as.Date(sample_collect_date)) %>% 
-                          # remove data missing sample_site_ids
-                          filter(!is.na(site_id)) %>%
-                          # group by site id and gene target
-                          group_by(site_id,pcr_gene_target, .drop = F) %>% 
-                          # keep only first ww record if there are two for a site on the same day
-                          distinct(sample_collect_date, .keep_all = TRUE) %>%
-                          # targets tested, with no positive detection will
-                          # have a missing conc value. To show no detection, change NA to 0
-                          mutate(pcr_target_avg_conc = if_else(is.na(pcr_target_avg_conc),0, pcr_target_avg_conc))
+redcap_df <- redcap_samples_to_df(redcap_ww_samples)
 
+## Step 1c:mapped and cleaned dataframe 
+clean_results <- redcap_df_clean(redcap_df, population)
+
+# Extract cleaned results from list
+redcap_all_samples <- clean_results$redcap_all_samples_clean
+seq_results <- clean_results$seq_results_clean
 
 ```
 
@@ -150,6 +164,8 @@ redcap_all_samples <- redcap_targets %>%
 
 ```{r ww_trends}
 # Step 2: Create datasets that contain concentrations normalized by flow rate and population, calculate the 7-day rolling geometric mean of normalized adjusted concentrations, and calculate 15-day percent change of log-transformed normalized concentrations
+
+geomean_pcr_gene_targets <- c("n", "InfA1 and InfA2 combined", "InfB", "RSV-A and RSV-B combined", "Norovirus GII")
 
 # Step 2a: Create a new dataset that:
 ## - maps wastewater sample data to site IDs and population counts
@@ -180,147 +196,71 @@ wwdata_flow_calc <- redcap_all_samples %>%
 # Calculate the adjustment values for special handling of reported 0 concentration
 adjustment_values <- wwdata_flow_calc %>% 
   filter(pcr_target_avg_conc > 0) %>% 
-  group_by(pcr_gene_target) %>% 
-  summarise(mean= mean(pcr_target_log_norm_conc), 
-            min = min(pcr_target_log_norm_conc), 
-            max = max(pcr_target_log_norm_conc), 
-            adj_log_norm_conc = 0.75 * min(pcr_target_log_norm_conc))   
-
+  group_by(pcr_gene_target, site_id) %>% 
+  reframe(adj_norm_conc = 0.75 * min(pcr_target_norm_conc)) %>%
+# fill in sites and gene target combos with zero for combos that have never had pcr_target_avg_conc > 0 
+# these would have been filtered out above for low prevalence pathogens such as mpox, H5, H1 at some sites
+# set the adjusted conc to 0
+  complete(
+    pcr_gene_target  = unique(wwdata_flow_calc$pcr_gene_target),
+    site_id   = unique(wwdata_flow_calc$site_id),
+    fill = list(adj_norm_conc = 0)
+  ) %>% 
+  ungroup()
 ## Step 2c: Create dataset that joins the newly created adjustment values dataset with the flow-pop normalized and log10 transformed wastewater sample dataset
 # - when the raw pcr target concentration is 0, replace that with the adjusted normalized concentration values
 # - raw concentrations above 0 but below LOD are still replaced with 1/2*LOD and then normalized and log-transformed
 # - non-log transformed adjusted normalized concentration is used for 7-day rolling geometric mean
 wwdata_flow_calc_adjusted <- wwdata_flow_calc %>%
-  left_join(adjustment_values, by = "pcr_gene_target") %>%
+  left_join(adjustment_values, by = c("pcr_gene_target", "site_id")) %>%
   mutate(
-    pcr_target_log_norm_conc = if_else(pcr_target_avg_conc == 0, 
-                                       adj_log_norm_conc, 
-                                       pcr_target_log_norm_conc)) %>%
-  select(-adj_log_norm_conc) # Remove the new_value_conc column after the update
+    pcr_target_norm_conc = if_else(pcr_target_avg_conc == 0, 
+                                       adj_norm_conc, 
+                                       pcr_target_norm_conc)) %>%
+  select(-adj_norm_conc) # Remove the new_value_conc column after the update
 
-## Step 2d: Create function for calculating geometric mean
-# - this is for generating 7-day rolling geometric means of normalized concentrations
-geo_mean <- function(x){
-  exp(mean(log(x), na.rm=TRUE))
-}
 
-## Step 2e: Create a new adjusted wastewater concentration dataset that:
-# - calculates the 7-day rolling geometric mean of 1/2*LOD adjusted normalized concentrations for each site and gene target
-wwdata_flow_calc_adjusted <- wwdata_flow_calc_adjusted %>%
+## Step 2d: Create a new adjusted wastewater concentration dataset that:
+# - calculates the 7-day rolling geometric mean of normalized concentrations for each site and gene target
+# - have to remove missing sample dates otherwise the function will not work
+# - gene target/sample dates with raw concentrations of zero are set to a geometric mean of zero
+rolling_result <- wwdata_flow_calc_adjusted %>%
+  filter(!is.na(sample_collect_date)) %>%
+  # arrange by sample collect date
+  arrange(sample_collect_date) %>%
+  # group by site and gene target
   group_by(site_id, pcr_gene_target) %>%
-  mutate(pcr_target_norm_7day_geomean = slide_dbl(
+  # calculate a 7-day rolling geometric mean of normalized concentrations with zeros replaced
+  mutate(pcr_target_norm_7day_geomean = slide_index_dbl(
     .x = pcr_target_norm_conc,
+    .i = sample_collect_date,
     .f = geo_mean,
-    .before = 6, # 6 previous days + current day = 7-day window
-    .after = 0,
-    .complete = FALSE
+    .before = days(6), # 6 previous days + current day = 7-day window
+    .complete = TRUE
   )
 ) %>%
-  # add county variable
-  mutate(county_main = county) %>%
+  mutate(pcr_target_norm_7day_geomean = if_else(pcr_target_avg_conc == 0,
+                                                0,
+                                                pcr_target_norm_7day_geomean)) %>%
   ungroup()
 
-## Step 2f: Create a 15-day wastewater trends dataset that:
-# - feeds in adjusted wastewater sample dataset 
-# - calculate trends for each sample site id and pcr gene target
-# - categorizes the percent change outputs
-# if desired, only calculate trends for a specific gene target
-wwtrends_cat <-  wwdata_flow_calc_adjusted %>% #filter(pcr_gene_target == "n1") %>% 
-                                  group_by(site_id, pcr_gene_target) %>% 
-                                  # calculate trends for each site/gene target combination
-                                  group_modify(~ calc_classify_trends(.data = .,
-                                       .date = "sample_collect_date",
-                                       .trend_var ='pcr_target_log_norm_conc' ,
-                                       .window_type = "time",
-                                       .window_size_sus = 15, 
-                                       .window_size_short = 8)) %>%
-                                  # using the sustained window (15) to categorize trends into 7 categories
-                                  # NA data in percent_cat means there is no recent data
-                                  mutate(ptc_sus = round(ptc_sus, 0),
-                                         percent_cat = cut(ptc_sus, 
-                                                           breaks = c(-1000000000, -100, -10, 0, 9, 99, 999, Inf), 
-                                                           labels = c("-100%", 
-                                                                      "-99% to -10%", 
-                                                                      "-9% to 0%", 
-                                                                      "1% to 9%", 
-                                                                      "10% to 99%", 
-                                                                      "100% to 999%", 
-                                                                      "1000% or more"),
-                                                           include.lowest = T,
-                                                           right = T)) %>%
-                                select(-ends_with(c("sus", "short")))
+# Re-add the rows with missing sample dates to the dataset
+# - these will have missing geometric means
+wwdata_flow_calc_adjusted <- wwdata_flow_calc_adjusted %>%
+    filter(is.na(sample_collect_date)) %>%
+  mutate(pcr_target_norm_7day_geomean = NA_real_) %>%
+  bind_rows(rolling_result)
+
 
 ```
 
 ## Calculate wastewater viral activity levels for site and county aggregations
 
-WVAL categorizes viral concentration into minimal, low, moderate, high, and very high to help indicate the risk of infection. 
-
-From CDC's methodology: 
-
-Calculating the Wastewater Viral Activity Level
-
-Major Changes in August 2025: 
-- No longer using normalized data
-- Baseline lookback period is 24 months for all respiratory targets (SARS-CoV-2, Flu A, RSV). Please note that WAWBE does not currently calculate WVAL for RSV due to insufficient wastewater concentration levels.
-- Requires 8 weeks of data 
-- Biannual recalculation dates for SARS-CoV-2 changed to April 1 and October 1
-- Updated WVAL level cut off points
-
-Baseline Calculation:
--For each combination of site, data submitter, PCR target, lab methods, and normalization method, a baseline is established. The “baseline” is the 10th percentile of the log-transformed concentration data within a specific time frame. Details on the baseline calculation by pathogen are below:
-
-SARS-CoV-2
--For site and method combinations (as listed above) with over 6 months of data, baselines are re-calculated every six calendar months (April 1st and October 1st) using the past 24 months of data.
-For sites and method combinations with less than 6 months of data, baselines are computed every time there is a new sample until reaching six months, after which they remain unchanged until the next April 1st or October 1st, at which time baselines are re-calculated.
-
-Influenza A and RSV
--For site and method combinations (as listed above) with over 12 months of data, baselines are re-calculated every August 1st using all available data in the previous 24 months.
-For sites and method combinations with less than 12 months of data, baselines are computed weekly until reaching twelve months, after which they remain unchanged until the next August 1st, at which time baselines are re-calculated.
-
--The standard deviation for each site and method combination is calculated using the same time frame as the baseline.
-
-Wastewater Viral Activity Level Calculation:
--The number of standard deviations that each log-transformed concentration value deviates from the baseline (positive if above, negative if below) is calculated.
-This value (x) is then converted back to a linear scale (by calculating e^x) to form the Wastewater Viral Activity Level for the site and method combination.
-The Wastewater Viral Activity Levels from a site are averaged by week for all figures.
-
-This reflects the updated cut points: 
-Wastewater Viral Activity Level Categories for SARS-CoV-2 (https://www.cdc.gov/nwss/about-data.html#data-method, Feb 2025): 
-The current Wastewater Viral Activity Level for each state and territory is categorized into very low, low, moderate, high, or very high as follows:
-SARS-CoV-2:
-Very Low: Up to 2
-Low: Greater than 2 and up to 3.4	
-Moderate: Greater than 3.4 and up to 5.3	
-High: Greater than 5.3 and up to 7.8	
-Very High: Greater than 7.8
-
-Influenza A:
-Very Low: Up to 2.7
-Low: Greater than 2.7 and up to 6.5	
-Moderate: Greater than 6.2 and up to 11.2	
-High: Greater than 11.2 and up to 17.6	
-Very High: Greater than 17.6
-
-
-RSV:
-Very Low: Up to 2.5	
-Low: Greater than 2.5 and up to 5.2	
-Moderate: Greater than 5.2 and up to 8	
-High: Greater than 8 and up to 11	
-Very High: Greater than 11
-
-
-Aggregation for National, Regional, and State Levels:
--We calculate the median Wastewater Viral Activity Levels among sites at national, regional, and state levels, excluding data from site/method combinations with less than 8 weeks of data for SARS-CoV-2, Influenza A, and RSV.
-
-Data Inclusion Criteria – SARS-COV-2, Influenza A, RSV Wastewater Viral Activity Level
-SARS-CoV-2: New wastewater sampling sites, or sites with a substantial change in laboratory methods are included in national, regional, state, or territorial median values once there are at least 8 weeks of samples reported for that location.
-
-Influenza A and RSV: New wastewater sampling sites, or sites with a substantial change in laboratory methods, are included in national and state or territorial median values beginning on August 1st of each year once there are at least 8 weeks of samples reported for that pathogen. Data must be reported by October 1st of that year to be included in national and state or territorial median values for that respiratory virus season. If data are reported after October 1st of that year, they will not be displayed until August 1st of the following year.
 
 ```{r}
 # Step 3: Create datasets that designate major lab methods and calculate wastewater viral activity levels at the site and county aggregation levels
+
+wval_pcr_gene_targets <- c("n", "InfA1 and InfA2 combined", "RSV-A and RSV-B combined")
 
 ## Step 3a: Create dataset that adds the following variables to the wastewater sample dataset:
 # - filters to micro lab name corresponding with PHL
@@ -349,26 +289,25 @@ wwdata_flow_calc_doh <- wwdata_flow_calc %>%
     concentration_method == 'ceresnano' & pcr_type == 'qiagen dpcr' ~ 8,
     # default value if none match
     TRUE ~ NA_integer_
-  )) %>%
-    # assign county variable
-    mutate(county_main = county)
+  )) 
   
 ## Step 3b: Create new site-week aggregated wastewater viral activity level for sars-cov-2 and flu a
 # - these datasets will be further aggregated into county week level
+# create overall wval dataset list for sars
 wval_site_agg_raw_sars <- wval_v2(wwdata_flow_calc_doh, target = 'sars-cov-2')
 wval_site_agg_raw_flua <- wval_v2(wwdata_flow_calc_doh, target = 'FLUAV')
+wval_site_agg_raw_rsv <- wval_v2(wwdata_flow_calc_doh, target = 'RSV')
 
 ## Step 3c: Join both wval datasets together
 # bind datasets
-wval_site_agg_raw <- bind_rows(wval_site_agg_raw_sars, wval_site_agg_raw_flua)
+wval_site_agg_raw <- bind_rows(wval_site_agg_raw_sars, wval_site_agg_raw_flua, wval_site_agg_raw_rsv)
 
 ## Step 3d: Create clean site-week aggregated wval dataset and prep for merging
 # select the columns to keep and rename for merging with core dataset
 wval_site_agg <- wval_site_agg_raw %>% distinct() %>% 
   select(site_id, pcr_target, week_end, county_names, wval_site_wk, wval_site_wk_level) %>%
   # rename to match variables in wwdata 
-  rename(sample_site_id = site_id,
-         county_main = county_names)
+  rename(county_main = county_names)
 
 ## Step 3e: Create new county-week aggregated wval dataset
 # calculate county wval aggregations
@@ -388,6 +327,7 @@ wval_county_agg <- wval_site_agg_raw  %>%
 ## Step 4a: Create clean wastewater sample dataset
 keep_flow_calc <- wwdata_flow_calc_adjusted %>% select(sample_id,
                                                   site_id, 
+                                                  site,
                                                   sample_collect_date,
                                                   test_result_date,
                                                   import_redcap_date,
@@ -398,8 +338,11 @@ keep_flow_calc <- wwdata_flow_calc_adjusted %>% select(sample_id,
                                                   pcr_target_norm_conc,
                                                   pcr_target_norm_7day_geomean,
                                                   pcr_target_below_lod,
+                                                  pcr_target_detection,
                                                   flow_rate_l,
                                                   totalpop,
+                                                  quality_flag,
+                                                  quality_flag_notes,
                                                   viral_data_flag,
                                                   data_flag_notes,
                                                   county_main) 
@@ -421,47 +364,61 @@ max_result_date <- keep_flow_calc %>%
 # - creates variable that designates when there is no recent data for calculating wvals
 # - creates a new variable that designates when wval was not calculated (for influenza b, mpox, rsv, etc)
 # - excludes mpox from 7-day rolling geometric mean calculation since there is not enough concentration data 
-core_dataset <-  wwtrends_cat %>% 
-  rename(sample_collect_date = date) %>%
-  mutate(week_end = sample_collect_date + days(7-wday(sample_collect_date))) %>% 
-  left_join(x=.,
-            y= keep_flow_calc,
-            by= c("sample_collect_date", "site_id", "pcr_gene_target")) %>%
+core_dataset <-  keep_flow_calc %>%
+  mutate(week_end = sample_collect_date + days(7 - wday(sample_collect_date))) %>%
   # Adding in the gene target for the sake of merging
- mutate(pcr_target = case_when(
-   pcr_gene_target %in% c('n', 'n1', 'n2') ~ "sars-cov-2",
-   pcr_gene_target == "InfA1 and InfA2 combined" ~ 'FLUAV',
-   TRUE ~ pcr_target),
-   # Don't calculate 7-day rolling geo mean for mpox - not enough site data
+  mutate(
+    pcr_target = case_when(
+      pcr_gene_target %in% c('n', 'n1', 'n2') ~ "sars-cov-2",
+      pcr_gene_target == "InfA1 and InfA2 combined" ~ 'FLUAV',
+      pcr_gene_target == "RSV-A and RSV-B combined" ~ 'RSV',
+      TRUE ~ pcr_target
+    ),
+    # Only display 7-day rolling geo mean for appropriate targets
     pcr_target_norm_7day_geomean = case_when(
-    pcr_gene_target == "G2R_G" ~ NA_real_,
-    pcr_gene_target == "e9l-nvar" ~ NA_real_,
-    # some RSV samples report NaN, change to NA_real
-    pcr_target_norm_7day_geomean == "NaN" ~ NA_real_,
-    TRUE ~ pcr_target_norm_7day_geomean
+      !(pcr_gene_target %in% geomean_pcr_gene_targets) ~ NA_real_,
+      pcr_target_norm_7day_geomean == "NaN" ~ NA_real_,
+      TRUE ~ pcr_target_norm_7day_geomean
     )
- ) %>%
-  left_join(x=.,
-            wval_site_agg, 
-            by = c("pcr_target", "week_end", "site_id" = "sample_site_id", "county_main")) %>%
-  left_join(x=.,
-            wval_county_agg, 
-            by = c("pcr_target", "week_end", "county_main")) %>%
-  mutate(pcr_target = if_else(pcr_gene_target %in% c('n', "InfA1 and InfA2 combined") & is.na(sample_id), NA, pcr_target)) %>%
+  ) %>%
+  left_join(
+    x = .,
+    wval_site_agg,
+    by = c("pcr_target", "week_end", "site_id", "county_main")
+  ) %>%
+  left_join(
+    x = .,
+    wval_county_agg,
+    by = c("pcr_target", "week_end", "county_main")
+  ) %>%
+  mutate(pcr_target = if_else(
+    pcr_gene_target %in% wval_pcr_gene_targets &
+      is.na(sample_id),
+    NA,
+    pcr_target
+  )) %>%
   # add "No Recent Data" or "Not Calculated" categorization to NAs
-    mutate(
+  mutate(
     wval_site_wk_level = case_when(
-      pcr_gene_target %in% c("n", "InfA1 and InfA2 combined") & is.na(wval_site_wk) & sample_collect_date < max_result_date ~ "No Recent Data",
-      pcr_gene_target %in% c("n1", "n2", "RSV-A and RSV-B combined", "InfB", "G2R_G") & is.na(wval_site_wk) & sample_collect_date < max_result_date ~ "Not Calculated",
+      pcr_gene_target %in% wval_pcr_gene_targets &
+        is.na(wval_site_wk) &
+        sample_collect_date <= max_result_date ~ "No Recent Data",
+      !(pcr_gene_target %in% wval_pcr_gene_targets) &
+        is.na(wval_site_wk) &
+        sample_collect_date <= max_result_date ~ "Not Calculated",
       TRUE ~ wval_site_wk_level
     ),
     wval_county_wk_level = case_when(
-      pcr_gene_target %in% c("n", "n1", "n2", "InfA1 and InfA2 combined") & is.na(wval_county_wk) & sample_collect_date < max_result_date ~ "No Recent Data",
-      pcr_gene_target %in% c("RSV-A and RSV-B combined", "InfB", "G2R_G") & is.na(wval_county_wk) & sample_collect_date < max_result_date ~ "Not Calculated",
+      pcr_gene_target %in% wval_pcr_gene_targets &
+        is.na(wval_county_wk) &
+        sample_collect_date <= max_result_date ~ "No Recent Data",
+      !(pcr_gene_target %in% wval_pcr_gene_targets) &
+        is.na(wval_county_wk) &
+        sample_collect_date <= max_result_date ~ "Not Calculated",
       TRUE ~ wval_county_wk_level
     )
-  ) %>%
-  ungroup()
+  )
+
 
 ```
 
@@ -469,7 +426,7 @@ core_dataset <-  wwtrends_cat %>%
 
 ```{r save}
 # The line below saves an R object, alternatively the df could be saved as a csv
-# save(core_dataset, file = core_dataset_path2)
+# save(core_dataset, file = core_dataset_path)
 
 time_end <- now()
 

@@ -127,7 +127,7 @@ calc_n1n2_avg <- function(data) {
       pcr_target_avg_conc = if_else(
         n_above_lod > 0,
         10^(mean(log10(pcr_target_avg_conc), na.rm = TRUE)),
-        mean(lod_sewage, na.rm = TRUE) / 2
+        avg_lod / 2
       ),
       
       # update lod_sewage to averaged value
@@ -382,7 +382,7 @@ wval_v2 <- function(data, target) {
       site_id_with_pcr_source = paste(site_id, pcr_target, source, sep = "_"),
       # add new column that combines site_id, pcr_target, source, and major lab method
       site_id_with_pcr_source_mlm = paste(site_id_with_pcr, source, major_lab_method, sep = "_")) %>%
-    # group by site, pcr target, and lab method to calculate days since first sample
+    # add site grouping to calculate days since first sample by site, not globally
     group_by(site_id_with_pcr_source_mlm) %>%
     # calculate days since first sample and first sample collection date
     mutate(
@@ -426,12 +426,13 @@ wval_v2 <- function(data, target) {
       complete(sample_collect_date = seq.Date(min(sample_collect_date, na.rm = TRUE),
                                               max(sample_collect_date, na.rm = TRUE),
                                               by = 'day')) %>%
-      # add flu season year: august 1st recalculation
-      mutate(flu_season_year = if_else(month(sample_collect_date) >= 8,
-                                       year(sample_collect_date),
-                                       year(sample_collect_date) - 1L),
-             # days to nearest august 1st recalculation target date
-             days_to_nearest_target = sapply(sample_collect_date, calc_days_to_target_flu_rsv)) %>%
+      mutate(
+        # add flu season year: august 1st recalculation    
+        flu_season_year = if_else(month(sample_collect_date) >= 8,
+                                  year(sample_collect_date),
+                                  year(sample_collect_date) - 1L),
+        # days to nearest august 1st recalculation target date
+        days_to_nearest_target = sapply(sample_collect_date, calc_days_to_target_flu_rsv)) %>%
       group_by(site_id_with_pcr_source_mlm, flu_season_year) %>%                       
       mutate(min_days_to_target = min(days_to_nearest_target, na.rm = TRUE)) %>%
       ungroup() %>%
@@ -452,6 +453,8 @@ wval_v2 <- function(data, target) {
   if(target == "sars-cov-2") {
     all_final4 <- all_final3 %>%
       group_by(site_id_with_pcr_source_mlm) %>%
+      # during first 6 months: recalculate on every sample
+      # after 6 months: recalculate only on the sample closest to Apr 1 or Oct 1
       mutate(baseline_flag = (days_since_first_sample <= 182) | (days_to_nearest_target == min_days_to_target), 
              temp_baseline = if_else(
                baseline_flag,
@@ -477,6 +480,8 @@ wval_v2 <- function(data, target) {
   else {
     all_final4 <- all_final3 %>%
       group_by(site_id_with_pcr_source_mlm) %>%
+      # during first 12 months: recalculate on every sample
+      # after 12 months: recalculate only on the sample closest to Aug 1 of each flu season
       mutate(baseline_flag = (days_since_first_sample <= 365) | (days_to_nearest_target == min_days_to_target),
              temp_baseline = if_else(
                baseline_flag,
@@ -526,6 +531,7 @@ wval_v2 <- function(data, target) {
     mutate(
       ww_index_ln = case_when(
         days_site_online < 56 ~ NA_real_, TRUE ~ (pcr_target_avg_conc_ln - last_baseline_ln) / last_std_ln),
+      ww_index_ln = if_else(last_std_ln == 0, 0, ww_index_ln),
       ww_index_ln_lin = exp(ww_index_ln),
       # create day of week and week end variables
       day_of_week = wday(sample_collect_date),
@@ -535,9 +541,6 @@ wval_v2 <- function(data, target) {
     arrange(sample_collect_date, .by_group = TRUE) %>%
     ungroup() %>%
     distinct()
-  
-  # create intermediate dataset
-  intermediate_sars <<- result
   
   
   ##################################################
@@ -567,8 +570,7 @@ wval_v2 <- function(data, target) {
   # at the result level
   unaggregated_result <- result %>%
     mutate(wval_result = categorize_wval(ww_index_ln_lin, target)) %>% distinct()
-  
-  unaggregated_result <<- unaggregated_result
+  # create list to output both                                                           
   
   
   
