@@ -43,7 +43,7 @@ source(here("R/credentials_ref.R"))
 load(here("population.RData"))
 
 # load wval functions
-source(here("R/wval_functions_v2.R"))
+source(here("R/wval_functions_v3.R"))
 
 # source simple metric calculation functions
 source(here("R/simple_metric_fns.R"))
@@ -294,9 +294,9 @@ wwdata_flow_calc_doh <- wwdata_flow_calc %>%
 ## Step 3b: Create new site-week aggregated wastewater viral activity level for sars-cov-2 and flu a
 # - these datasets will be further aggregated into county week level
 # create overall wval dataset list for sars
-wval_site_agg_raw_sars <- wval_v2(wwdata_flow_calc_doh, target = 'sars-cov-2')
-wval_site_agg_raw_flua <- wval_v2(wwdata_flow_calc_doh, target = 'FLUAV')
-wval_site_agg_raw_rsv <- wval_v2(wwdata_flow_calc_doh, target = 'RSV')
+wval_site_agg_raw_sars <- wval_v3(wwdata_flow_calc_doh, target = 'sars-cov-2')
+wval_site_agg_raw_flua <- wval_v3(wwdata_flow_calc_doh, target = 'FLUAV')
+wval_site_agg_raw_rsv <- wval_v3(wwdata_flow_calc_doh, target = 'RSV')
 
 ## Step 3c: Join both wval datasets together
 # bind datasets
